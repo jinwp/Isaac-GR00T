@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 ACTION_KEYS = ("body_q", "base_quat", "inspire_hand", "camera")
 ACTION_DIM = 47
 ACTION_HORIZON = int(os.environ.get("HALAB_ACTION_HORIZON", "32"))  # as halab_47d_config
+ACTION_STRIDE = int(os.environ.get("HALAB_ACTION_STRIDE", "1"))  # 30 Hz frames per row, as halab_gr00t_adapter
 
 # OpenHLM ``joint_layout.PI_GROUPS`` (names as logged: ``name.split("(")[0]``) as
 # indices into our 47D order [body_q29 (G1 order) | base_quat_wxyz4 | hand12 | camera2].
@@ -212,7 +213,8 @@ def _error_metrics(sums: dict[str, np.ndarray], scale: np.ndarray, physical: str
     for name, idx in ACTION_GROUPS:
         out[f"mae_{physical}/{name}"] = float(mae_phys[idx].mean())
     weighted = sums["abs_row_dim"] * scale[None, :]
-    rows = np.arange(weighted.shape[0])
+    # Row j is frame t + N (j + 1), i.e. 30 Hz row (j + 1) N - 1 (= j at 30 Hz): the windows stay in seconds.
+    rows = (np.arange(weighted.shape[0]) + 1) * ACTION_STRIDE - 1
     for lo, hi, label in HORIZON_WINDOWS:
         in_window = (rows >= lo) & (rows < hi)
         count = sums["n_row"][in_window].sum()

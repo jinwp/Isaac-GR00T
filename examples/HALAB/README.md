@@ -45,12 +45,24 @@ sbatch 는 `HALAB_*` 환경변수만 정하고 `jobs/halab_chain_runner.sh` → 
 `HALAB_TRAIN_RTC=1`, `HALAB_RTC_MAX_DELAY=10`, `HALAB_STATE_DROPOUT=0.0`, `HALAB_KEEP_EVERY_STEPS=10000`.
 VLM 포함 전체 학습 (`tune_llm`, `tune_visual` 켬; GR00T 기본값은 둘 다 꺼짐). `HALAB_TUNE_VLM=0` 이면 VLM freeze (GR00T 기본값).
 
+OpenHLM `--action-fps` / `--temporal mem` 대응 (기본값은 꺼짐, 기존 런과 같음):
+
+| 변수 | 의미 |
+|---|---|
+| `HALAB_ACTION_STRIDE=N` | chunk 행 간격 (30 Hz 프레임 수). 2 = 15 Hz, 행 j = 프레임 t + N(j+1) |
+| `HALAB_IMAGE_HISTORY=K` | 과거 이미지 K장 (GR00T 여러 장 이미지 입력, 오래된 것부터, 현재가 마지막). 에피소드 시작 전 프레임은 뺌 |
+| `HALAB_IMAGE_HISTORY_STRIDE`, `_JITTER` | 과거 이미지 간격 (기본 30) 과 학습 때 ±jitter (기본 5) |
+| `HALAB_IMAGE_HISTORY_DROP_ALL`, `_DROP_OLDEST` | 학습 때 샘플마다 과거 이미지 전부를 빼는 확률, 아니면 가장 오래된 k ~ U{1..K} 장을 빼는 확률 |
+
+학습 시 `HALAB_*` 값은 `<run>/halab_env.json` 에 저장됩니다.
+
 | run | sbatch |
 |---|---|
 | v2 (12 task, chunk 32, 20k) | `jobs/halab_g1_47d_v2.sbatch` |
 | v5 (12 task, chunk 50 + RTC, 20k) | `jobs/halab_g1_47d_v5_c50_rtc.sbatch` |
 | 38 task (chunk 50 + RTC, 50k) | `jobs/halab38_g1_47d_c50_rtc_50k.sbatch` |
 | 38 task, VLM freeze (나머지 위와 같음) | `jobs/halab38_g1_47d_c50_rtc_50k_vlmfreeze.sbatch` |
+| 38 task, VLM freeze + 과거 이미지 5장 (1초 간격, dropout 0.1/0.3) + action 15 Hz | `jobs/halab38_g1_47d_c50_rtc_50k_vlmfreeze_mem15.sbatch` |
 
 ## 평가
 

@@ -354,6 +354,13 @@ def main() -> None:
         "task_names": args.task_name or None,
     }
 
+    # The HALAB_* switches (chunk length, action stride, image history, ...) decide what a checkpoint
+    # expects at inference; keep them next to the checkpoints.
+    if int(os.environ.get("RANK", "0")) == 0:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        halab_env = {key: value for key, value in sorted(os.environ.items()) if key.startswith("HALAB_")}
+        (args.output_dir / "halab_env.json").write_text(json.dumps(halab_env, indent=2) + "\n", encoding="utf-8")
+
     if args.openhlm_episode_split and episodes is not None:
         raise ValueError(
             "--openhlm-episode-split uses all discovered episodes; do not combine it "

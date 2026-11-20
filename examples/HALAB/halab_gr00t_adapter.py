@@ -66,12 +66,81 @@ ACTION_DIMS = {
     "camera": 2,
 }
 
-# 30 Hz rows per action chunk; same switch as halab_47d_config.ACTION_HORIZON.
+# Rows per action chunk; same switch as halab_47d_config.ACTION_HORIZON.
 ACTION_HORIZON = int(os.environ.get("HALAB_ACTION_HORIZON", "32"))
+# 30 Hz frames per chunk row (OpenHLM ``--action-fps 30/N``): row j is frame t + N (j + 1), so N = 1 is the
+# original t+1 ... t+H chunk and N = 2 is 15 Hz (50 rows = 3.33 s). Same switch in halab_metrics.
+ACTION_STRIDE = int(os.environ.get("HALAB_ACTION_STRIDE", "1"))
+if ACTION_STRIDE < 1:
+    raise ValueError(f"HALAB_ACTION_STRIDE must be >= 1, got {ACTION_STRIDE}")
+
+# Image history: OpenHLM ``--temporal mem`` frame spacing and truncation (openpi.ha.temporal.sample_offsets,
+# pi0_ha._truncate_history), fed through GR00T's own multi-frame input (each past frame is one more image in the
+# VLM prompt, oldest first, current last) instead of MEM's SigLIP temporal attention. IMAGE_HISTORY past frames,
+# IMAGE_HISTORY_STRIDE frames apart; in training each moves by U{-jitter..jitter}. A frame before the episode
+# start is left out. Training only, per sample: every past frame is dropped with DROP_ALL, else the oldest
+# k ~ U{1..K} with DROP_OLDEST. Evaluation uses the nominal spacing and the full history. No proprio history.
+IMAGE_HISTORY = int(os.environ.get("HALAB_IMAGE_HISTORY", "0"))
+IMAGE_HISTORY_STRIDE = int(os.environ.get("HALAB_IMAGE_HISTORY_STRIDE", "30"))
+IMAGE_HISTORY_JITTER = int(os.environ.get("HALAB_IMAGE_HISTORY_JITTER", "5"))
+IMAGE_HISTORY_DROP_ALL = float(os.environ.get("HALAB_IMAGE_HISTORY_DROP_ALL", "0"))
+IMAGE_HISTORY_DROP_OLDEST = float(os.environ.get("HALAB_IMAGE_HISTORY_DROP_OLDEST", "0"))
+if IMAGE_HISTORY < 0 or IMAGE_HISTORY_STRIDE < 1 or IMAGE_HISTORY_JITTER < 0:
+    raise ValueError("HALAB_IMAGE_HISTORY must be >= 0, _STRIDE >= 1, _JITTER >= 0")
+if IMAGE_HISTORY and 2 * IMAGE_HISTORY_JITTER >= IMAGE_HISTORY_STRIDE:
+    raise ValueError("HALAB_IMAGE_HISTORY_JITTER must stay below stride / 2 so the frames keep their order")
+if min(IMAGE_HISTORY_DROP_ALL, IMAGE_HISTORY_DROP_OLDEST) < 0 or IMAGE_HISTORY_DROP_ALL + IMAGE_HISTORY_DROP_OLDEST > 1:
+    raise ValueError("HALAB_IMAGE_HISTORY_DROP_ALL / _DROP_OLDEST must be >= 0 with a sum <= 1")
 
 
 def _numpy(tensor: torch.Tensor) -> np.ndarray:
     return tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+
+
+_HISTORY_RNG: tuple[int, np.random.Generator] | None = None
+
+
+def _history_rng() -> np.random.Generator:
+    """Per-process generator from OS entropy: loader workers of different ranks must not share draws."""
+    global _HISTORY_RNG
+    if _HISTORY_RNG is None or _HISTORY_RNG[0] != os.getpid():
+        _HISTORY_RNG = (os.getpid(), np.random.default_rng())
+    return _HISTORY_RNG[1]
+
+
+def history_frames(anchor: int, *, train: bool, rng: np.random.Generator | None = None) -> list[int]:
+    """Episode frame indices of the past images kept for ``anchor``, oldest first."""
+    if IMAGE_HISTORY == 0:
+        return []
+    rng = rng if rng is not None else _history_rng()
+    ages = np.arange(IMAGE_HISTORY, 0, -1, dtype=np.int64) * IMAGE_HISTORY_STRIDE
+    if train and IMAGE_HISTORY_JITTER > 0:
+        ages = ages + rng.integers(-IMAGE_HISTORY_JITTER, IMAGE_HISTORY_JITTER + 1, size=IMAGE_HISTORY)
+    frames = int(anchor) - ages
+    keep = frames >= 0
+    if train and (IMAGE_HISTORY_DROP_ALL > 0 or IMAGE_HISTORY_DROP_OLDEST > 0):
+        coin = rng.random()
+        if coin < IMAGE_HISTORY_DROP_ALL:
+            keep[:] = False
+        elif coin < IMAGE_HISTORY_DROP_ALL + IMAGE_HISTORY_DROP_OLDEST:
+            keep[: int(rng.integers(1, IMAGE_HISTORY + 1))] = False
+    return [int(frame) for frame in frames[keep]]
+
+
+def read_history_images(
+    halab_dataset: LeRobotVLADataset, index: int, *, train: bool, rng: np.random.Generator | None = None
+) -> list[np.ndarray]:
+    """Past RGB uint8 (H, W, 3) frames for sample ``index`` of the HA loader, oldest first."""
+    task_idx, episode_index, anchor = halab_dataset._locate(index)
+    frames = history_frames(anchor, train=train, rng=rng)
+    if not frames:
+        return []
+    handle = halab_dataset._get_io_handle(task_idx, episode_index)
+    rows = sorted(set(frames))
+    aligned = handle.read_aligned_rows(rows)
+    mp4_index = {frame: int(aligned["frame_index"][pos]) for pos, frame in enumerate(rows)}
+    cap_key = (task_idx, episode_index)
+    return [halab_dataset._read_image(handle, mp4_index[frame], cap_key) for frame in frames]
 
 
 class HalabGr00tAdapter(Dataset):
@@ -123,13 +192,15 @@ class HalabGr00tAdapter(Dataset):
             "camera": _numpy(proprio["camera_action"][-1:]),
         }
 
-        # HA actions have shape (1, horizon, D); the leading dimension denotes
-        # the single anchor.  Drop it and deliberately omit measured_joint_dq.
+        # HA actions have shape (1, horizon * stride, D); the leading dimension denotes
+        # the single anchor.  Drop it, keep every ACTION_STRIDE-th 30 Hz row (frames
+        # t + N, t + 2N, ...) and deliberately omit measured_joint_dq.
+        rows = slice(ACTION_STRIDE - 1, None, ACTION_STRIDE)
         actions = {
-            "body_q": _numpy(action["measured_joint_q"][0]),
-            "base_quat": _numpy(action["body_quat"][0]),
-            "inspire_hand": _numpy(action["hand_action"][0]),
-            "camera": _numpy(action["camera_action"][0]),
+            "body_q": _numpy(action["measured_joint_q"][0][rows]),
+            "base_quat": _numpy(action["body_quat"][0][rows]),
+            "inspire_hand": _numpy(action["hand_action"][0][rows]),
+            "camera": _numpy(action["camera_action"][0][rows]),
         }
 
         state_dim = sum(value.shape[-1] for value in states.values())
@@ -153,7 +224,7 @@ class HalabGr00tAdapter(Dataset):
                 "episode_index": sample["meta"]["episode_index"],
                 "frame_id": sample["meta"]["frame_id"],
                 "action_valid_mask": _numpy(
-                    sample["meta"]["action_chunk_valid_mask"][0]
+                    sample["meta"]["action_chunk_valid_mask"][0][rows]
                 ),
             },
         )
@@ -161,6 +232,11 @@ class HalabGr00tAdapter(Dataset):
     def __getitem__(self, index: int) -> Any:
         sample = self.halab_dataset[index]
         step = self.to_vla_step(sample)
+        if IMAGE_HISTORY > 0 and self.halab_dataset.load_images:
+            # Training jitter / truncation follow the processor's mode (set per sample by the datasets below).
+            train = bool(getattr(self.processor, "training", False))
+            past = read_history_images(self.halab_dataset, index, train=train)
+            step.images = {"ego_view": past + step.images["ego_view"]}
         if self.processor is None:
             return step
         processed = self.processor(
@@ -364,7 +440,7 @@ def build_halab_dataset(
         episodes=episodes,
         episode_keys=episode_keys,
         num_past_frames=0,
-        action_chunk_size=ACTION_HORIZON,
+        action_chunk_size=ACTION_HORIZON * ACTION_STRIDE,  # 30 Hz rows; to_vla_step keeps every N-th
         action_start_offset=1,
         load_images=load_images,
         include_body_vel=True,  # Preserve dq in the 76D observation.
