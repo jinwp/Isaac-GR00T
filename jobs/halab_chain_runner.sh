@@ -122,9 +122,13 @@ TRAIN_ARGS=(
   --use-wandb
   --state-dropout-prob "${HALAB_STATE_DROPOUT:-0.0}"
   --wandb-project "${WANDB_PROJECT}"
-  --tune-llm
-  --tune-visual
 )
+
+# HALAB_TUNE_VLM=1 (default): full fine-tune incl. the Cosmos-Reason2 LLM and vision encoder.
+# HALAB_TUNE_VLM=0: GR00T default, VLM frozen; only the projector and action head train.
+if [ "${HALAB_TUNE_VLM:-1}" = "1" ]; then
+  TRAIN_ARGS+=(--tune-llm --tune-visual)
+fi
 
 if [ "${HALAB_COLOR_JITTER:-0}" = "1" ]; then
   TRAIN_ARGS+=(--color-jitter)

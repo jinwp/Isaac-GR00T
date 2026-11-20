@@ -43,13 +43,14 @@ sbatch jobs/halab38_g1_47d_c50_rtc_50k.sbatch   # 38 task, chunk 50, RTC, 50k st
 sbatch 는 `HALAB_*` 환경변수만 정하고 `jobs/halab_chain_runner.sh` → `launch_halab_finetune.py` 를 실행합니다.
 주요 값: `HALAB_ACTION_HORIZON=50`, `HALAB_GLOBAL_BATCH=256`, `HALAB_LR=1e-4` (cosine, warmup 5%),
 `HALAB_TRAIN_RTC=1`, `HALAB_RTC_MAX_DELAY=10`, `HALAB_STATE_DROPOUT=0.0`, `HALAB_KEEP_EVERY_STEPS=10000`.
-VLM 포함 전체 학습 (`tune_llm`, `tune_visual` 켬; GR00T 기본값은 둘 다 꺼짐).
+VLM 포함 전체 학습 (`tune_llm`, `tune_visual` 켬; GR00T 기본값은 둘 다 꺼짐). `HALAB_TUNE_VLM=0` 이면 VLM freeze (GR00T 기본값).
 
 | run | sbatch |
 |---|---|
 | v2 (12 task, chunk 32, 20k) | `jobs/halab_g1_47d_v2.sbatch` |
 | v5 (12 task, chunk 50 + RTC, 20k) | `jobs/halab_g1_47d_v5_c50_rtc.sbatch` |
 | 38 task (chunk 50 + RTC, 50k) | `jobs/halab38_g1_47d_c50_rtc_50k.sbatch` |
+| 38 task, VLM freeze (나머지 위와 같음) | `jobs/halab38_g1_47d_c50_rtc_50k_vlmfreeze.sbatch` |
 
 ## 평가
 
