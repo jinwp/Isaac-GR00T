@@ -10,13 +10,13 @@
 
 #SBATCH --job-name=halab38m15
 #SBATCH --partition=ha-lab
-#SBATCH --qos=debug
+#SBATCH --qos=long
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=a40:4
 #SBATCH --cpus-per-task=28
 #SBATCH --mem=240G
-#SBATCH --time=03:55:00
+#SBATCH --time=7-00:00:00
 #SBATCH --output=/coc/flash2/jpark984/gr00t_baseline/halab38-m15-%j.out
 #SBATCH --error=/coc/flash2/jpark984/gr00t_baseline/halab38-m15-%j.err
 
@@ -32,8 +32,13 @@ export HALAB_IMAGE_HISTORY_JITTER=5
 export HALAB_IMAGE_HISTORY_DROP_ALL=0.1
 export HALAB_IMAGE_HISTORY_DROP_OLDEST=0.3
 export HALAB_NUM_GPUS=4
-export HALAB_GLOBAL_BATCH=256
-export HALAB_ACCUMULATION=1
+# Effective batch 256 as the other runs, as 32/GPU x 4 x accumulation 2: at 64/GPU the 6-image batch
+# ran out of A40 memory in the first backward (32.9 GiB allocated + 11 GiB fragmented, job 2026-11-20).
+export HALAB_GLOBAL_BATCH=128
+export HALAB_ACCUMULATION=2
+# The image count varies per sample (history dropout, episode start), so tensor sizes vary: let the
+# allocator grow segments instead of leaving fragmented reserved blocks.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export HALAB_LR=1e-4
 export HALAB_GRADIENT_CHECKPOINTING=1
 export HALAB_DATALOADER_WORKERS=6  # 6 video reads per sample; 4 x (1 + 6) = the 28 CPUs
@@ -47,6 +52,10 @@ export HALAB_COLOR_JITTER=0
 export HALAB_TRAIN_RTC=1
 export HALAB_RTC_MAX_DELAY=10
 export HALAB_MAX_NO_PROGRESS=3
+# long qos: one 7-day leg; clean save 1 h before the limit, hard stop 30 min before. If a leg ends
+# before 50k (time limit, node failure), the chain runner resubmits from the newest checkpoint.
+export HALAB_LEG_SECONDS=601200
+export HALAB_TIMEOUT_SECONDS=603000
 # G1 + Inspire MJCF of MotionTokenizers for the FK (cm) metrics, as in OpenHLM g1_fk.py.
 export HALAB_FK_MJCF="${HALAB_FK_MJCF:-/coc/flash2/dscho1234/Workspace/OpenHLM/thirdparty/MotionTokenizers/assets/g1_with_inspire_hand/g1_29dof_rev_1_0_with_inspire_hand_DFQ.xml}"
 

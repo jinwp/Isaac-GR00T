@@ -19,9 +19,10 @@ STATS_PATH=${OUTPUT_DIR}/train_statistics.json
 MAX_STEPS=${HALAB_MAX_STEPS:-20000}
 # Each leg checkpoints and exits cleanly after LEG_SECONDS (counted from launch,
 # so model loading is included). TIMEOUT_SECONDS is only a hard fallback; both
-# stay under the sbatch --time=03:55:00 (14,100 s) limit.
+# stay under the sbatch --time limit (defaults: debug qos, 03:55:00 = 14,100 s;
+# long qos 7-00:00:00 = 604,800 s sets HALAB_LEG_SECONDS / HALAB_TIMEOUT_SECONDS).
 LEG_SECONDS=${HALAB_LEG_SECONDS:-12000}
-TIMEOUT_SECONDS=13200
+TIMEOUT_SECONDS=${HALAB_TIMEOUT_SECONDS:-13200}
 # Periodic saves are a crash safety net only; the leg-end save carries progress.
 SAVE_STEPS=${HALAB_SAVE_STEPS:-500}
 EVAL_STEPS=1000

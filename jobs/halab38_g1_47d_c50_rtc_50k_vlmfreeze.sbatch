@@ -5,13 +5,13 @@
 
 #SBATCH --job-name=halab38frz
 #SBATCH --partition=ha-lab
-#SBATCH --qos=debug
+#SBATCH --qos=long
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=a40:4
 #SBATCH --cpus-per-task=28
 #SBATCH --mem=240G
-#SBATCH --time=03:55:00
+#SBATCH --time=7-00:00:00
 #SBATCH --output=/coc/flash2/jpark984/gr00t_baseline/halab38-frz-%j.out
 #SBATCH --error=/coc/flash2/jpark984/gr00t_baseline/halab38-frz-%j.err
 
@@ -36,6 +36,10 @@ export HALAB_COLOR_JITTER=0
 export HALAB_TRAIN_RTC=1
 export HALAB_RTC_MAX_DELAY=10
 export HALAB_MAX_NO_PROGRESS=3
+# long qos: one 7-day leg; clean save 1 h before the limit, hard stop 30 min before. If a leg ends
+# before 50k (time limit, node failure), the chain runner resubmits from the newest checkpoint.
+export HALAB_LEG_SECONDS=601200
+export HALAB_TIMEOUT_SECONDS=603000
 # G1 + Inspire MJCF of MotionTokenizers for the FK (cm) metrics, as in OpenHLM g1_fk.py.
 export HALAB_FK_MJCF="${HALAB_FK_MJCF:-/coc/flash2/dscho1234/Workspace/OpenHLM/thirdparty/MotionTokenizers/assets/g1_with_inspire_hand/g1_29dof_rev_1_0_with_inspire_hand_DFQ.xml}"
 
